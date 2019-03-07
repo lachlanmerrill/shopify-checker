@@ -1,6 +1,7 @@
 const SLEEPTIME = 3000;
 
 const https = require('https');
+const request = require('request');
 const port = 3000;
 
 let stdin = process.stdin;
@@ -90,12 +91,12 @@ let commands = {
 function writeProductData() {
     let pJSON = JSON.stringify(product_list);
     try {
-        console.log(">- Writing to products file");
+        console.log(">+ Writing to products file");
         fs.writeFile(products, pJSON, (err, result) => {
             if (err) throw new err;
         });
     } catch (err) {
-        console.log(">- Error encountered when writing to products file: ");
+        console.log(">! Error encountered when writing to products file: ");
         console.error(err);
     }
 }
@@ -104,10 +105,10 @@ function writeProductData() {
  * Prints available commands.
  */
 function printHelp() {
-    console.log(">- Available commands: ");
+    console.log(">+ Available commands: ");
     let keys = Object.keys(commands);
     for (let i = 0; i < keys.length; i++) {
-        console.log("- " + keys[i] + ": " + commands[keys[i]].description);
+        console.log("+ " + keys[i] + ": " + commands[keys[i]].description);
     }
 }
 
@@ -143,9 +144,9 @@ function addSite(url, name, path) {
 function deleteProduct(name) {
     if (name !== "" && product_list.hasOwnProperty(name)) {
         delete product_list[name];
-        console.log(">- No longer tracking site ID '" + name + "'.")
+        console.log(">+ No longer tracking site ID '" + name + "'.")
     } else {
-        console.log(">- Failed: Products list does not contain '" + name + "'.")
+        console.log(">! Failed: Products list does not contain '" + name + "'.")
     }
 }
 
@@ -187,25 +188,30 @@ function parseProductInfo(data, id) {
      */
 
     let prods = [];
+    data = JSON.parse(data);
+    let keys = Object.keys(data.products);
+    for (let i = 0; i < keys.length; i++) {
+        let variants = [];
+        let current = data.products[i];
 
-    for (let p in data) {
-        let variants = []
-        for (let v in data) {
+        for (let j = 0; j < Object.keys(current.variants).length; j++) {
+            let cv = current.variants[j];
             variants.push({
-                'id': v.id,
-                'title': v.title,
-                'available': v.available,
-                'price': v.price,
+                'id': cv.id,
+                'title': cv.title,
+                'available': cv.available,
+                'price': cv.price,
             });
         }
+
         prods.push({
-            'id' : p.id,
-            'handle' : p.handle,
-            'variants' : variants,
-        });
+            'id': current.id,
+            'handle': current.handle,
+            'variants': variants,
+        })
     }
 
-    console.log("Parsed info: " + prods);
+    console.log(">+ Parsed info from " + id);
 
     return prods;
 }
@@ -219,28 +225,19 @@ function parseProductInfo(data, id) {
 function getProductData(url, path) {
     return new Promise(resolve => {
         let options = {
-            host: url,
-            path: path,
-            method: 'POST',
-            headers: {}
+            url: "https://" + url + path,
+            headers: {
+                'User-Agent': 'request'
+            }
         };
-        console.log(options);
-        https.request(options, (resp) => {
-            let data = '';
-            resp.on("data", (chunk) => {
-                data += chunk;
-                console.log(data);
-            });
 
-            resp.on("end", () => {
-                console.log(">- Received data from " + url);
-                console.log(data.products);
-                resolve(data);
-            });
-        }).on("error", (err) => {
-            console.log(">- Error from " + url);
-            console.log(err.message);
-            return "";
+        request(options, (err, resp, body) => {
+            if (err) {
+                console.log('>! Error while connecting to ' + options.url + ": " + err.message);
+                resolve({})
+            }
+            console.log('>+ Received data from ' + options.url);
+            resolve(body);
         });
     });
 }
@@ -269,16 +266,16 @@ async function run() {
             let url = product_list[keys[i]].loc;
             let path = product_list[keys[i]].path;
 
-            console.log(keys[i] + ":" + url + path);
+            console.log('Checking ' + keys[i] + ":" + url + path);
 
             await getProductData(url, path).then(data => {
-                console.log(data);
                 product_list[keys[i]].products = parseProductInfo(data, keys[i]);
             });
 
         }
 
         writeProductData();
+        console.log(">+ Check cycle finished. Waiting " + SLEEPTIME + "ms...");
         await sleep(SLEEPTIME);
     } while (cont);
 }
@@ -299,14 +296,14 @@ async function getInput() {
                 await printHelp();
                 break;
             case 'add':
-                let site = await readLineAsync("URL? ");
+                let site = await readLineAsync(">?URL? ");
                 site = site.replace(/(^\w+:|^)\/\//, '')
-                let path = await readLineAsync("PATH? ");
-                let name = await readLineAsync("ID? ");
+                let path = await readLineAsync(">?PATH? ");
+                let name = await readLineAsync(">?ID? ");
                 await addSite(site, name, path);
                 break;
             case 'delete':
-                let delName = await readLineAsync("ID? ");
+                let delName = await readLineAsync(">?ID? ");
                 await deleteProduct(delName);
                 break;
             case 'list':
@@ -316,17 +313,17 @@ async function getInput() {
                 await run();
                 break;
             case 'quit':
-                console.log(">- Exiting.");
+                console.log(">! Exiting.");
                 cont = false;
                 break;
             default:
-                console.log(">- Command not recognized. To see a list of available commands type 'help' or '?'");
+                console.log(">! Command not recognized. To see a list of available commands type 'help' or '?'");
         }
     } while (cont);
     process.exit(0);
 }
 
-console.log(">- Shopify-Checker initializing.");
+console.log(">+ Shopify-Checker initializing.");
 
 /***
  * Setup before getInput loop. Searches for products.json file. If one is found, read it into product_list. If not,
@@ -335,33 +332,33 @@ console.log(">- Shopify-Checker initializing.");
  * @returns {Promise<void>} Nothing
  */
 async function setup() {
-    console.log(">- Looking for products file...");
+    console.log(">+ Looking for products file...");
     try {
         if (fs.existsSync(products)) {
-            console.log(">- Products file found. Reading...");
+            console.log(">+ Products file found. Reading...");
             fs.readFile(products, 'utf8', (err, data) => {
                 if (err) throw err;
                 product_list = JSON.parse(data);
             });
-            console.log(">- Products file read. Awaiting input...");
+            console.log(">+ Products file read. Awaiting input...");
         } else {
 
-            let uin = await readLineAsync('>- No product file detected! Would you like to create a products file? (y/n)');
+            let uin = await readLineAsync('>? No product file detected! Would you like to create a products file? (y/n)');
 
             if (uin === 'y') {
-                console.log(">- Creating products file...");
+                console.log(">+ Creating products file...");
                 product_list = {
 
                 };
                 await writeProductData()
             } else {
-                console.log(">- No products data exists. Exiting.");
+                console.log(">! No products data exists. Exiting.");
                 process.exit(0);
             }
 
         }
     } catch (err) {
-        console.log(">- Error encountered when reading products file: ");
+        console.log(">! Error encountered when reading products file: ");
         console.error(err)
     }
     getInput();
